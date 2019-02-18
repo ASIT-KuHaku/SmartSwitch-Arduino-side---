@@ -1,0 +1,304 @@
+/*
+ Name:   Intelligent_Remote_Control_Switch.ino
+ Author:  ASIT_KuHaku(2540784213@qq.com)
+*/
+
+//更新记录
+/*
+	0214 1646 完成功能和指令说明
+	0214 2222 完成指令框架，下一步完成细节和循环检测时间
+	0214 2337 完成智能开关V1
+*/
+
+//指令说明
+/*
+	立即关 00
+	立即开 01
+
+	定时关 10
+	定时开 11
+*/
+/*
+	FF 指令头
+	X1 指令长度
+	X2 操作类型(开或者关)
+	X3 周几
+	X4 时
+	X5 分
+	X6 秒
+	X7 0X0A(Port)
+	FE 指令尾
+*/
+/*
+	立即关 00
+	立即开 01
+
+	定时关 0X10 0X0F 23 59 59 
+	定时开 0X11 0X0F 06 30 30
+
+	FF 02 20 0A FE 停用关灯定时
+	FF 02 21 0A FE 启用关灯定时
+	FF 02 22 0A FE 停用开灯定时
+	FF 02 23 0A FE 启用开灯定时
+*/
+
+//功能说明
+/*
+	[OK]定时开关：设定时间，通过读取时间判断是否该执行
+	[OK]遥控开关：手机通过蓝牙连接蓝牙串口，通过蓝牙无线收发用户指令
+	[OK]断电记忆：相关设定存入EEPROM，数据掉电不丢失
+*/
+
+//待处理问题
+/*
+	定时开关：检测周期被执行程序岔开后，检测时当前时间已超过目标时间，此时应该立即执行
+*/
+
+//接口定义
+/*
+	//蓝牙串口
+	RX_Pin    = 0;
+	TX_Pin    = 1;
+
+	//DS1302
+	CE_PIN    = 5;
+	IO_PIN    = 6;
+	SCLK_PIN  = 7;
+
+	//舵机
+	Servo_PIN = 9;
+*/
+
+#include<Other.h>
+#include<DS1302.h>
+#include<Servo.h>
+
+
+//****************************************
+//全局变量
+Terminal_Pool *Alarm_clock_Terminal_Pool = new Terminal_Pool();
+HardwareSerial_Terminal HT = HardwareSerial_Terminal(115200);
+//DS1302参数
+uint8_t CE_PIN = 5; uint8_t IO_PIN = 6; uint8_t SCLK_PIN = 7;
+DS1302 rtc(CE_PIN, IO_PIN, SCLK_PIN);
+bool Flag_Switch_Off_Timing = 0; bool Flag_Switch_On_Timing = 0;
+Time_All_Byte Switch_Off_Time; Time_All_Byte Switch_On_Time;
+//舵机角度设置
+byte Switch_Off_Angle = 0; byte Switch_On_Angle = 50;
+byte StandingBy_Angle = 25;
+uint8_t Servo_PIN = 9;
+Servo Switch_Ctrl_Servo;
+//EEPROM
+uint16_t ADDR_Switch_Off = 0; uint16_t ADDR_Switch_On = 5;
+//****************************************
+
+
+//****************************************
+//开关控制
+void Switch_Off() { Switch_Ctrl_Servo.write(Switch_Off_Angle); }
+void Switch_On() { Switch_Ctrl_Servo.write(Switch_On_Angle); }
+//****************************************
+//判断闹钟时间是否到达，并执行操作
+void Alarm_clock_TimeCheck_TimeSlice() {
+	//关判断
+	{
+		Time t = rtc.time();
+
+		if (Flag_Switch_Off_Timing)
+			if (Switch_Off_Time.Get_Day_Week_Ava(t.day) == true)
+				if (Switch_Off_Time.Hour = t.hr)
+					if (Switch_Off_Time.Minute = t.min)
+						if (Switch_Off_Time.Second = t.sec)
+							Switch_Off();
+	}
+	//开判断
+	{
+		Time t = rtc.time();
+
+		if (Flag_Switch_On_Timing)
+			if (Switch_On_Time.Get_Day_Week_Ava(t.day) == true)
+				if (Switch_On_Time.Hour = t.hr)
+					if (Switch_On_Time.Minute = t.min)
+						if (Switch_On_Time.Second = t.sec)
+							Switch_On();
+	}
+	//
+}
+//****************************************
+//设置操作启动时间
+void Set_Switch_Off_Time(byte _Week, byte _Hour, byte _Minute, byte _Second) {
+	Switch_Off_Time.Set_Time(_Week, _Hour, _Minute, _Second);
+
+	if (_Week != Switch_Off_Time.Week)
+		if (EEPROM_Operation.byte_.read(ADDR_Switch_Off + 1) != _Week)
+			EEPROM_Operation.byte_.write(ADDR_Switch_Off + 1, _Week);
+	if (_Hour != Switch_Off_Time.Hour)
+		if (EEPROM_Operation.byte_.read(ADDR_Switch_Off + 2) != _Hour)
+			EEPROM_Operation.byte_.write(ADDR_Switch_Off + 2, _Hour);
+	if (_Minute != Switch_Off_Time.Minute)
+		if (EEPROM_Operation.byte_.read(ADDR_Switch_Off + 3) != _Minute)
+			EEPROM_Operation.byte_.write(ADDR_Switch_Off + 3, _Minute);
+	if (_Second != Switch_Off_Time.Second)
+		if (EEPROM_Operation.byte_.read(ADDR_Switch_Off + 4) != _Second)
+			EEPROM_Operation.byte_.write(ADDR_Switch_Off + 4, _Second);
+}
+void Set_Switch_On_Time(byte _Week, byte _Hour, byte _Minute, byte _Second) {
+	Switch_On_Time.Set_Time(_Week, _Hour, _Minute, _Second);
+
+	if (_Week != Switch_On_Time.Week)
+		if (EEPROM_Operation.byte_.read(ADDR_Switch_On + 1) != _Week)
+			EEPROM_Operation.byte_.write(ADDR_Switch_On + 1, _Week);
+	if (_Hour != Switch_On_Time.Hour)
+		if (EEPROM_Operation.byte_.read(ADDR_Switch_On + 2) != _Hour)
+			EEPROM_Operation.byte_.write(ADDR_Switch_On + 2, _Hour);
+	if (_Minute != Switch_On_Time.Minute)
+		if (EEPROM_Operation.byte_.read(ADDR_Switch_On + 3) != _Minute)
+			EEPROM_Operation.byte_.write(ADDR_Switch_On + 3, _Minute);
+	if (_Second != Switch_On_Time.Second)
+		if (EEPROM_Operation.byte_.read(ADDR_Switch_On + 4) != _Second)
+			EEPROM_Operation.byte_.write(ADDR_Switch_On + 4, _Second);
+}
+//****************************************
+//添加指令
+/*
+	FF 02 20 0A FE 停用关灯定时
+	FF 02 21 0A FE 启用关灯定时
+
+	FF 02 22 0A FE 停用开灯定时
+	FF 02 23 0A FE 启用开灯定时
+*/
+byte SmartSwitch_OrderSet(Byte_Array &_Code) {
+	switch (_Code.length) {
+	case 1: {
+		//
+		if (_Code.Byte_Array_Addr[0] == 0x00)Switch_Off();
+		else if (_Code.Byte_Array_Addr[0] == 0x01)Switch_On();
+		//
+		else if (_Code.Byte_Array_Addr[0] == 0x20) {
+			if (EEPROM_Operation.byte_.read(ADDR_Switch_Off) != 0)
+				EEPROM_Operation.byte_.write(ADDR_Switch_Off, 0);
+		}
+		else if (_Code.Byte_Array_Addr[0] == 0x21) {
+			if (EEPROM_Operation.byte_.read(ADDR_Switch_Off) != 1)
+				EEPROM_Operation.byte_.write(ADDR_Switch_Off, 1);
+		}
+		else if (_Code.Byte_Array_Addr[0] == 0x22) {
+			if (EEPROM_Operation.byte_.read(ADDR_Switch_On) != 0)
+				EEPROM_Operation.byte_.write(ADDR_Switch_On, 0);
+		}
+		else if (_Code.Byte_Array_Addr[0] == 0x23) {
+			if (EEPROM_Operation.byte_.read(ADDR_Switch_On) != 1)
+				EEPROM_Operation.byte_.write(ADDR_Switch_On, 1);
+		}
+		//
+		else return 0;
+
+		HT.write(0xFF); HT.write(0x01); HT.write(0x0A); HT.write(0xFE);
+		return 1;
+	}
+	case 5: {
+		if (_Code.Byte_Array_Addr[0] == 0x10)Set_Switch_Off_Time(_Code.Byte_Array_Addr[1], _Code.Byte_Array_Addr[2], _Code.Byte_Array_Addr[3], _Code.Byte_Array_Addr[4]);
+		else if (_Code.Byte_Array_Addr[0] == 0x11)Set_Switch_On_Time(_Code.Byte_Array_Addr[1], _Code.Byte_Array_Addr[2], _Code.Byte_Array_Addr[3], _Code.Byte_Array_Addr[4]);
+		else return 0;
+
+		HT.write(0xFF); HT.write(0x01); HT.write(0x0A); HT.write(0xFE);
+		return 1;
+	}
+	default: {
+		return 0;
+	}
+	}
+}
+//****************************************
+//存取闹钟时间
+void Get_Timing_from_EEPROM(bool &_Flag_Timing, Time_All_Byte &_Time, uint16_t _Addr)
+{
+	_Flag_Timing = EEPROM_Operation.byte_.read(_Addr);
+	_Time.Week = EEPROM_Operation.byte_.read(_Addr + 1);
+	_Time.Hour = EEPROM_Operation.byte_.read(_Addr + 2);
+	_Time.Minute = EEPROM_Operation.byte_.read(_Addr + 3);
+	_Time.Second = EEPROM_Operation.byte_.read(_Addr + 4);
+}
+void Get_All_Timing_from_EEPROM(
+	bool &_Flag_Switch_Off_Timing, Time_All_Byte &_Switch_Off_Time, uint16_t _Off_Addr,
+	bool &_Flag_Switch_On_Timing, Time_All_Byte &_Switch_On_Time, uint16_t _On_Addr)
+{
+	Get_Timing_from_EEPROM(_Flag_Switch_Off_Timing, _Switch_Off_Time, _Off_Addr);
+	Get_Timing_from_EEPROM(_Flag_Switch_On_Timing, _Switch_On_Time, _On_Addr);
+}
+//
+void Set_Timing_to_EEPROM(bool &_Flag_Timing, Time_All_Byte &_Time, uint16_t _Addr)
+{
+	EEPROM_Operation.byte_.write(_Addr, _Flag_Timing);
+	EEPROM_Operation.byte_.write(_Addr + 1, _Time.Week);
+	EEPROM_Operation.byte_.write(_Addr + 2, _Time.Hour);
+	EEPROM_Operation.byte_.write(_Addr + 3, _Time.Minute);
+	EEPROM_Operation.byte_.write(_Addr + 4, _Time.Second);
+}
+void Set_All_Timing_to_EEPROM(
+	bool &_Flag_Switch_Off_Timing, Time_All_Byte &_Switch_Off_Time, uint16_t _Off_Addr,
+	bool &_Flag_Switch_On_Timing, Time_All_Byte &_Switch_On_Time, uint16_t _On_Addr)
+{
+	Set_Timing_to_EEPROM(_Flag_Switch_Off_Timing, _Switch_Off_Time, _Off_Addr);
+	Set_Timing_to_EEPROM(_Flag_Switch_On_Timing, _Switch_On_Time, _On_Addr);
+}
+//****************************************
+//Arduino主函数入口
+void setup() {
+	//DS1302设置
+	rtc.write_protect(false);
+	rtc.halt(false);
+	//设置时间
+	//Time Now_Time(2019, 2, 1, 23, 59, 59, 7);
+	//rtc.time(Now_Time); return;
+	//设备号
+	byte Host_ID[] = { 'A','l','C','l' };
+	byte MobilePhone_ID[] = { 'M','o','P','h' };
+	//终端
+	Common_Terminal *MobilePhone = new Common_Terminal(&HT, MobilePhone_ID, Host_ID, false);
+	MobilePhone->Port_Available_List->change_bool(Code_List.Command_Code, 1);
+	Alarm_clock_Terminal_Pool->Add_Terminal(MobilePhone);
+	//启动
+	MobilePhone->begin();
+	MobilePhone->Port_Available_List->change_bool(0x0A, ON);
+	//初始化用户的额外指令
+	MobilePhone->Init_user_code(1);
+	MobilePhone->Add_User_Code((void(*)(void))SmartSwitch_OrderSet, 0x0A);
+	//舵机
+	Switch_Ctrl_Servo.attach(Servo_PIN);
+	Switch_Ctrl_Servo.write(StandingBy_Angle);
+	//读取EEPROM内的闹钟状态
+	Get_All_Timing_from_EEPROM(
+		Flag_Switch_Off_Timing, Switch_Off_Time, ADDR_Switch_Off,
+		Flag_Switch_On_Timing, Switch_On_Time, ADDR_Switch_On);
+}
+void loop() {
+	//循环1s
+	for (uint16_t i = 0; i < 500; i++) {
+		//每ms检测终端指令
+		Alarm_clock_Terminal_Pool->TimeSlice();
+		//1ms延时
+		delay(1);
+	}
+	//执行闹钟时间检测
+	Alarm_clock_TimeCheck_TimeSlice();
+}
+//****************************************
+
+
+
+
+//从 DS1302 获取当前时间
+void Print_DS1302_Time() {
+	{
+		Time t = rtc.time();
+
+		// 将日期代码格式化后输出
+		Serial.print("周"); Serial.print(t.day); Serial.print(",");
+		Serial.print((int)t.yr); Serial.print("-"); Serial.print((int)t.mon); Serial.print("-"); Serial.print((int)t.date);
+		Serial.print(" ");
+		Serial.print((int)t.hr); Serial.print(":"); Serial.print((int)t.min); Serial.print(":"); Serial.print((int)t.sec);
+
+		Serial.println();
+	}
+}
